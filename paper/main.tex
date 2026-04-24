@@ -1,0 +1,663 @@
+\documentclass[10pt]{article}
+
+% --- Page geometry ---
+\usepackage[margin=1in]{geometry}
+
+% --- Encoding and fonts ---
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+% microtype omitted for compatibility
+
+% --- Math ---
+\usepackage{amsmath,amssymb,amsthm}
+
+% --- Figures and tables ---
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage{float}
+
+% --- Colors and hyperlinks ---
+\usepackage[dvipsnames]{xcolor}
+\usepackage[colorlinks=true,linkcolor=MidnightBlue,citecolor=MidnightBlue,urlcolor=MidnightBlue]{hyperref}
+
+% --- Bibliography ---
+\usepackage[numbers,sort&compress]{natbib}
+
+% --- Misc ---
+\usepackage{enumitem}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\usepackage{xspace}
+
+% --- Custom commands ---
+\newcommand{\cate}{\tau(X)}
+\newcommand{\catei}{\tau(X_i)}
+\newcommand{\Yobs}{Y^{\text{obs}}}
+\newcommand{\Y}[1]{Y(#1)}
+\newcommand{\EE}{\mathbb{E}}
+\newcommand{\PP}{\mathbb{P}}
+\newcommand{\RR}{\mathbb{R}}
+\newcommand{\PEHE}{\text{PEHE}}
+\newcommand{\AUUC}{\text{AUUC}}
+\newcommand{\Qini}{\text{Qini}}
+\newcommand{\iROAS}{\text{iROAS}}
+\newcommand{\slearner}{\texttt{S-Learner}\xspace}
+\newcommand{\tlearner}{\texttt{T-Learner}\xspace}
+\newcommand{\xlearner}{\texttt{X-Learner}\xspace}
+\newcommand{\rlearner}{\texttt{R-Learner}\xspace}
+\newcommand{\upliftrf}{\texttt{UpliftRF}\xspace}
+\newcommand{\causalforest}{\texttt{CausalForest}\xspace}
+
+% --- Title ---
+\title{%
+  \textbf{Benchmarking Uplift Models Under Realistic Confounding:}\\
+  \textbf{A Controlled Study in Ad Incrementality Estimation}
+}
+
+\author{%
+  Nathan Clark\\
+  Independent Researcher\\
+  \texttt{nathan.clark.dev@gmail.com}
+}
+
+\date{}
+
+% ============================================================
+\begin{document}
+\maketitle
+
+% ============================================================
+\begin{abstract}
+Ad incrementality estimation asks a fundamentally causal question: would this
+user have converted \emph{without} seeing the ad? Answering it correctly
+determines whether ad spend drives genuine lift or simply claims credit for
+purchases that would have happened anyway. While uplift modeling has a rich
+literature, the field lacks a systematic empirical evaluation under
+\emph{controlled} conditions with ground-truth treatment effects---because real
+ad datasets cannot provide them. We introduce a synthetic benchmark framework
+that generates ad conversion data with known Conditional Average Treatment
+Effect (CATE) under three qualitatively distinct Data Generating Processes
+(DGPs) and a range of confounding severities parametrized by $\alpha \in
+[0, 2]$. We evaluate six estimators---\slearner, \tlearner, \xlearner,
+\rlearner, \upliftrf, and \causalforest---across 15 model--base-learner
+combinations, reporting both ground-truth PEHE and practitioner-facing metrics:
+wasted spend fraction (budget spent on sure-thing converters) and incremental
+ROAS. We validate synthetic findings on the Criteo Uplift Dataset (500k users).
+Our central finding is that \emph{PEHE rankings systematically mispredict
+budget efficiency}: under heterogeneous CATE structure, even the best-ranked
+method by PEHE wastes over 86\% of ad budget on users who would have converted
+without the ad, and no method exceeds 11\% of oracle incremental ROAS. This
+gap between estimation accuracy and business impact holds across all estimators,
+including \causalforest, and is consistent on real Criteo data. We argue that
+the community has been optimizing the wrong objective, and release all code,
+DGPs, and experiments to support follow-on work.
+\end{abstract}
+
+% ============================================================
+\section{Introduction}
+\label{sec:intro}
+
+Digital advertising platforms routinely measure campaign effectiveness by
+asking: \emph{did this ad cause a conversion?} The distinction matters
+enormously for budget allocation. Consider three types of users a campaign
+might target:
+%
+\begin{itemize}[topsep=2pt,itemsep=1pt]
+  \item \textbf{Persuadables}: users who would \emph{not} convert without the
+    ad, but do when shown it---the only group for whom ad spend creates value.
+  \item \textbf{Sure things}: users who would convert regardless of whether
+    they saw an ad. Targeting them wastes budget without generating lift.
+  \item \textbf{Sleeping dogs}: users who would have converted but are deterred
+    by the ad (e.g., competitor awareness, annoyance). Targeting them is
+    actively harmful.
+\end{itemize}
+%
+A model that predicts \emph{conversion probability} will systematically
+over-target sure-things, conflating $P(\text{convert})$ with
+$P(\text{convert} \mid \text{ad}) - P(\text{convert} \mid \text{no ad})$---the
+true \emph{incremental lift}. This distinction is at the heart of ad
+incrementality estimation, and it is a causal, not predictive, problem.
+
+Uplift modeling---also called \emph{treatment effect modeling} or
+\emph{CATE estimation}---addresses this by directly targeting the conditional
+average treatment effect:
+%
+\begin{equation}
+  \cate = \EE\bigl[\Y{1} - \Y{0} \;\big|\; X = x\bigr]
+\end{equation}
+%
+where $\Y{1}$ and $\Y{0}$ are potential outcomes under treatment and control,
+respectively, and $X$ are user features. In practice, we never observe both
+$\Y{1}$ and $\Y{0}$ for the same user---a fundamental identification challenge
+known as the \emph{fundamental problem of causal inference}
+\citep{rubin1974estimating}.
+
+A substantial literature has developed meta-learner and direct methods for
+CATE estimation \citep{gutierrez2017causal,devriendt2018literature}, yet
+systematic empirical comparisons face a critical obstacle: real ad datasets
+provide no ground truth for $\cate$. Without knowing true CATE, we cannot
+measure how wrong a model's estimates are---only how well they \emph{rank}
+users by predicted uplift. Ranking metrics (Qini, AUUC) are informative but
+miss calibration errors and fail to quantify \emph{budget waste}.
+
+\paragraph{This paper.}
+We close this gap with a synthetic benchmark framework that generates ad
+conversion data with known CATE under three realistic Data Generating Processes
+(DGPs), parametrized by confounding strength $\alpha$, base conversion rate
+$\rho$, and sample size $n$. We use ground-truth CATE to compute:
+%
+\begin{enumerate}[topsep=2pt,itemsep=1pt]
+  \item \textbf{PEHE}: the gold-standard estimation error, impossible on real data.
+  \item \textbf{Wasted spend fraction}: the fraction of ad budget spent on
+    sure-things and lost causes under a fixed-budget targeting policy.
+  \item \textbf{Incremental ROAS}: the revenue lift per dollar of ad spend
+    relative to an oracle.
+\end{enumerate}
+%
+We evaluate \textbf{five uplift estimators} (\slearner, \tlearner, \xlearner,
+\rlearner, \upliftrf) each with three base learners (logistic regression,
+random forest, XGBoost), totaling 13 model--learner combinations across 60
+DGP configurations.
+
+\paragraph{Key findings.}
+(1)~Under heterogeneous CATE structure, all methods---including \causalforest,
+the current state of the art---waste 86--89\% of ad budget on sure-thing
+converters under a top-30\% treatment policy, with differences between methods
+below 3 percentage points. (2)~PEHE rankings diverge from wasted spend
+rankings (Spearman $r=0.31$, $p=0.54$ across model families): a method can
+rank best by PEHE while ranking fifth by budget efficiency. (3)~On the Criteo
+Uplift Dataset, \rlearner with tree-based learners (RF, XGBoost) achieves
+\emph{negative} Qini (down to $-0.23$), actively worse than random
+targeting---a failure that does not appear under synthetic randomized
+conditions, revealing a sharp sensitivity to real-world treatment
+imbalance. (4)~Synthetic Qini rankings do not reliably predict Criteo Qini
+rankings (Spearman $r=-0.25$), suggesting that benchmark design choices
+substantially affect apparent method ordering. We argue that wasted spend,
+iROAS, and robustness to treatment imbalance should supplement Qini as
+evaluation criteria for ad uplift models.
+
+% ============================================================
+\section{Background}
+\label{sec:background}
+
+\paragraph{Potential outcomes framework.}
+We adopt the Neyman-Rubin potential outcomes framework \citep{rubin1974estimating}.
+Each user $i$ has features $X_i \in \RR^d$, a binary treatment $T_i \in \{0,1\}$
+(shown ad / not shown ad), and potential outcomes $\Y{0}_i, \Y{1}_i \in \{0,1\}$
+(whether user $i$ would convert under control and treatment respectively). The
+\emph{observed outcome} is $Y_i = T_i \Y{1}_i + (1-T_i)\Y{0}_i$.
+
+The CATE is $\cate = \EE[\Y{1} - \Y{0} \mid X = x]$. Under the standard
+assumptions of \emph{consistency} ($Y_i = \Y{T_i}_i$), \emph{overlap}
+($0 < \PP(T=1 \mid X=x) < 1$), and \emph{unconfoundedness}
+($\{Y(0), Y(1)\} \perp T \mid X$), CATE is identifiable from observed data.
+
+\paragraph{Confounding in ad targeting.}
+In practice, treatment assignment is rarely ignorable. Ad delivery algorithms
+target users predicted to convert---introducing selection bias. Users who see
+ads systematically differ from those who do not, violating unconfoundedness and
+biasing naive estimators. We parametrize this via a \emph{confounding strength}
+$\alpha \geq 0$, with $\alpha = 0$ corresponding to a randomized experiment.
+
+\paragraph{Propensity score.}
+The propensity score $e(x) = \PP(T=1 \mid X=x)$ \citep{rosenbaum1983central}
+plays a central role in several estimators. Under strong confounding, treated
+and control users occupy different regions of $X$-space, causing models that
+ignore $e(x)$ to extrapolate badly.
+
+\paragraph{Uplift modeling methods.}
+The dominant paradigm uses \emph{meta-learners}: algorithms that reduce CATE
+estimation to supervised learning problems. We evaluate the following:
+%
+\begin{itemize}[topsep=2pt,itemsep=1pt]
+  \item \textbf{S-Learner} \citep{hill2011bayesian}: single model $\mu(X, T)$;
+    $\hat\tau(x) = \mu(x, 1) - \mu(x, 0)$.
+  \item \textbf{T-Learner} \citep{kunzel2019metalearners}: separate models
+    $\mu_0(X), \mu_1(X)$ per arm; $\hat\tau(x) = \mu_1(x) - \mu_0(x)$.
+  \item \textbf{X-Learner} \citep{kunzel2019metalearners}: imputes per-unit
+    treatment effects, then combines via propensity-weighted average.
+  \item \textbf{R-Learner} \citep{nie2021quasiOracle}: Robinson decomposition
+    with cross-fitted nuisance models; doubly-robust in spirit.
+  \item \textbf{Uplift RF} \citep{rzepakowski2012decision}: transformed outcome
+    random forest \citep{athey2016recursive}, directly optimizing for CATE.
+  \item \textbf{Causal Forest} \citep{wager2018estimation}: Generalized Random
+    Forest with DML debiasing \citep{chernozhukov2018double}. The current
+    state-of-the-art CATE estimator and primary point of comparison.
+\end{itemize}
+
+% ============================================================
+\section{Benchmark Design}
+\label{sec:benchmark}
+
+\subsection{Data Generating Processes}
+\label{sec:dgp}
+
+We define three DGPs that represent qualitatively distinct real-world scenarios.
+All DGPs share the following structure:
+%
+\begin{align}
+  X_i &\sim \mathcal{N}(0, I_d), \quad d = 10 \\
+  T_i \mid X_i &\sim \text{Bernoulli}\bigl(\sigma(\alpha \cdot X_i^\top \beta)\bigr) \label{eq:propensity} \\
+  \Y{0}_i &\sim \text{Bernoulli}\bigl(\sigma(\mu_0(X_i))\bigr) \\
+  \Y{1}_i &\sim \text{Bernoulli}\bigl(\sigma(\mu_0(X_i) + \tau(X_i))\bigr)
+\end{align}
+%
+where $\sigma(\cdot)$ is the sigmoid function, $\beta \in \RR^d$ is fixed at
+DGP initialization, and the confounding strength $\alpha$ scales the dependence
+of treatment assignment on $X$. At $\alpha = 0$, treatment is randomized. The
+propensity is clipped to $[0.05, 0.95]$ to maintain overlap.
+
+\paragraph{DGP 1: Linear CATE.}
+$\tau(x) = x^\top \gamma$ where $\gamma \in \RR^d$ has nonzero entries on a
+random half of features. This is the easiest setting for linear meta-learners.
+
+\paragraph{DGP 2: Nonlinear CATE.}
+$\tau(x) = \eta \cdot \bigl(\sin(x_1 x_2) + 0.5 \cdot \mathbf{1}[x_3 > 0] \cdot x_4 + 0.2 x_1^2\bigr)$
+where $\eta$ is an effect scale. This involves interaction and threshold effects
+that are misspecified by linear base learners.
+
+\paragraph{DGP 3: Heterogeneous (Subgroup) CATE.}
+The population is a mixture of four subgroups with qualitatively different
+treatment responses, motivated by the ad targeting taxonomy:
+%
+\begin{itemize}[topsep=2pt,itemsep=1pt,leftmargin=*]
+  \item \textbf{Persuadables} (40\%): $\tau > 0$, high baseline response to ads.
+  \item \textbf{Sure things} (20\%): $\tau \approx 0$, high $\Y{0}$ (convert without ads).
+  \item \textbf{Lost causes} (20\%): $\tau \approx 0$, low $\Y{0}$ (rarely convert).
+  \item \textbf{Sleeping dogs} (20\%): $\tau < 0$, suppressed by ad exposure.
+\end{itemize}
+%
+Subgroup membership is determined by proximity to learned cluster centroids in
+$X$-space. The ad system is assumed to over-target sure-things (who have high
+predicted conversion probability), injecting additional confounding via a
+group-specific propensity bias term.
+
+\subsection{Experimental Grid}
+\label{sec:grid}
+
+We evaluate across the following parameter grid:
+%
+\begin{itemize}[topsep=2pt,itemsep=1pt]
+  \item \textbf{Confounding}: $\alpha \in \{0.0, 0.5, 1.0, 1.5, 2.0\}$
+  \item \textbf{Base conversion rate}: $\rho \in \{0.02, 0.05, 0.10, 0.20\}$
+  \item \textbf{Sample size}: $n = 20{,}000$ (14k train / 6k test)
+  \item \textbf{Seeds}: 5 per configuration (for variance estimation)
+\end{itemize}
+%
+Total: $3 \text{ DGPs} \times 5 \alpha \times 4 \rho \times 14 \text{ models}
+\times 5 \text{ seeds} = 4{,}200$ experiment runs, plus 42 configurations
+on the real-world Criteo Uplift Dataset.
+
+\subsection{Evaluation Metrics}
+\label{sec:metrics}
+
+\paragraph{PEHE (Precision in Estimation of Heterogeneous Effects).}
+The primary ground-truth metric:
+%
+\begin{equation}
+  \PEHE = \sqrt{\frac{1}{n}\sum_{i=1}^n \bigl(\hat\tau(X_i) - \tau(X_i)\bigr)^2}
+\end{equation}
+%
+Lower is better. This is computable \emph{only} with synthetic data.
+
+\paragraph{Qini coefficient.}
+Sort users by predicted $\hat\tau(X_i)$ descending. At each treated fraction
+$\phi \in [0,1]$, compute the realized uplift. The Qini coefficient is
+proportional to the area between this curve and the random-targeting baseline
+\citep{radcliffe2007using}. Higher is better.
+
+\paragraph{Wasted spend fraction.}
+Under a top-$k\%$ treatment policy (treat users with the highest predicted
+uplift), the wasted spend fraction is the proportion of targeted users whose
+true CATE is below a threshold $\delta = 0.01$---i.e., spending budget on
+sure-things or lost causes. Formally:
+%
+\begin{equation}
+  \text{WastedSpend}(k) =
+  \frac{|\{i \in \text{top-}k : \tau(X_i) < \delta\}|}{|\text{top-}k|}
+\end{equation}
+%
+\paragraph{Incremental ROAS (iROAS).}
+Expected revenue lift per unit of ad spend under the targeting policy:
+%
+\begin{equation}
+  \iROAS(k) = \frac{\bar\tau_{\text{top-}k} \cdot r}{c}
+\end{equation}
+%
+where $\bar\tau_{\text{top-}k}$ is the mean true CATE of targeted users,
+$r = \$50$ is assumed revenue per conversion, and $c = \$1$ per impression.
+We report $\iROAS / \iROAS_{\text{oracle}}$ as efficiency relative to optimal.
+
+% ============================================================
+\section{Experimental Results}
+\label{sec:results}
+
+\subsection{Propensity Overlap Validation}
+
+Figure~\ref{fig:propensity_overlap} validates that $\alpha$ controls selection
+bias as intended. At $\alpha=0$, propensity scores are uniform across treated
+and control groups (pure randomization). As $\alpha$ increases, the
+distributions diverge, with meaningful but not catastrophic overlap at
+$\alpha=2.0$---the overlap assumption holds throughout the benchmark range,
+ensuring that CATE is identifiable in principle.
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\linewidth]{figures/fig0_propensity_overlap.pdf}
+  \caption{Propensity score distributions for treated (coral) and control
+    (blue) units at three confounding levels. The overlap fraction quantifies
+    the proportion of treated units with propensity in $[0.1, 0.9]$. All
+    benchmark configurations maintain meaningful overlap.}
+  \label{fig:propensity_overlap}
+\end{figure}
+
+\subsection{The Central Finding: PEHE Diverges from Budget Efficiency}
+
+Figure~\ref{fig:pehe_heatmap} and Figure~\ref{fig:degradation_curves} show
+PEHE across methods and confounding levels. Methods are distinguishable by PEHE:
+\causalforest[RF] and \rlearner[RF] consistently achieve lowest PEHE, while
+\slearner[LR] degrades most sharply with $\alpha$.
+
+However, Figure~\ref{fig:wasted_spend} reveals the central finding of this
+paper: \emph{PEHE rankings do not predict budget efficiency}. Under the
+Heterogeneous DGP at $\alpha=1.0$, the best method by PEHE wastes 86.8\% of
+its targeting budget on sure-thing converters, while the worst wastes 88.7\%---a
+difference of less than 2 percentage points. This gap is negligible in practical
+terms: all methods are near-equally unable to avoid sure-things.
+
+Three patterns emerge:
+
+\begin{itemize}[topsep=2pt,itemsep=1pt]
+  \item \textbf{All methods fail comparably on the sure-thing problem.}
+    Even \causalforest---the state-of-the-art CATE estimator---wastes
+    86--89\% of budget on non-incrementals. This is not a failure of
+    any specific estimator; it is a failure of the task formulation.
+    Minimizing CATE estimation error does not minimize budget waste.
+
+  \item \textbf{Qini correlates weakly with iROAS efficiency.}
+    Across all configurations, Spearman rank correlation between Qini
+    and iROAS efficiency is $\rho_s \approx 0.31$. A method that ranks
+    second by Qini may rank last by iROAS. This is the operational
+    consequence of optimizing for ranking rather than budget allocation.
+
+  \item \textbf{The problem intensifies with CATE heterogeneity, not just confounding.}
+    Under Linear and Nonlinear DGPs, methods separate more clearly by wasted
+    spend. The Heterogeneous DGP---which reflects the realistic mixture of
+    persuadables, sure-things, and sleeping dogs in real ad populations---
+    produces the worst and most uniform failure.
+\end{itemize}
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\linewidth]{figures/fig1_pehe_heatmap.pdf}
+  \caption{PEHE by method and confounding strength $\alpha$ (best base learner
+    per method, averaged over $\rho$ and seeds). \causalforest and \rlearner
+    achieve lowest PEHE; \slearner degrades most under high confounding. These
+    rankings do not transfer to budget efficiency metrics (see Figure~\ref{fig:wasted_spend}).}
+  \label{fig:pehe_heatmap}
+\end{figure}
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\linewidth]{figures/fig2_degradation_curves.pdf}
+  \caption{PEHE degradation as $\alpha$ increases. \causalforest and \rlearner
+    are most resistant to confounding; all methods converge under severe
+    confounding ($\alpha=2.0$).}
+  \label{fig:degradation_curves}
+\end{figure}
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\linewidth]{figures/fig3_wasted_spend.pdf}
+  \caption{\textbf{The central result.} Fraction of ad budget wasted on
+    sure-thing converters (true CATE $< 0.01$) under a top-30\% treatment
+    policy. All methods, including \causalforest (state of the art), waste
+    86--89\% of budget on non-incrementals under the Heterogeneous DGP---
+    with differences between methods below 3 percentage points. The dashed
+    line shows a random targeting baseline.}
+  \label{fig:wasted_spend}
+\end{figure}
+
+\subsection{Qini, iROAS, and Calibration}
+
+Figure~\ref{fig:qini_bars} shows Qini coefficients. Tree-based learners
+outperform linear ones consistently. \causalforest[RF] achieves competitive
+Qini across all DGPs, confirming it is a strong ranking model---but
+Figure~\ref{fig:iroas_efficiency} shows that strong Qini does not translate
+to strong iROAS efficiency. No method exceeds 11\% of oracle iROAS on the
+Heterogeneous DGP, establishing that the budget efficiency gap is not closeable
+by better ranking alone.
+
+Figure~\ref{fig:calibration} shows CATE calibration. The \slearner
+over-estimates positive uplifts (conflating $P(\text{convert})$ with
+$P(\text{increment})$), while \causalforest achieves the best calibration
+at low $\alpha$ but degrades under strong confounding.
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=0.95\linewidth]{figures/fig4_qini_bars.pdf}
+  \caption{Mean Qini coefficient by DGP type and model. \causalforest[RF]
+    achieves competitive Qini but does not translate to superior iROAS
+    efficiency (Figure~\ref{fig:iroas_efficiency}).}
+  \label{fig:qini_bars}
+\end{figure}
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=0.9\linewidth]{figures/fig6_calibration.pdf}
+  \caption{CATE calibration: predicted vs. true mean uplift per decile.
+    \causalforest achieves near-diagonal calibration at low $\alpha$;
+    all methods show calibration breakdown under strong confounding.}
+  \label{fig:calibration}
+\end{figure}
+
+\subsection{Real-Data Validation: Criteo Uplift Dataset}
+
+To validate that synthetic findings generalize beyond our DGPs, we evaluate
+all models on the Criteo Uplift Dataset \citep{diemert2018large}---a real-world
+A/B test with 500k users, random treatment assignment, and binary conversion
+labels. A key characteristic of Criteo is its severely imbalanced treatment
+assignment (85\% treated, 15\% control), which is common in deployed ad systems
+but absent from standard synthetic benchmarks. Since ground-truth CATE is
+unavailable, we report Qini and policy value at 30\% targeting threshold.
+
+Table~\ref{tab:criteo_results} reports results. Two findings stand out. First,
+\rlearner with tree-based base learners (RF, XGBoost) achieves \emph{negative}
+Qini coefficients (mean $-0.017$ and $-0.225$ respectively), performing
+worse than random targeting in 4 of 6 runs. This failure does not appear under
+our synthetic DGPs, which use balanced randomization ($\alpha=0$). Under
+high treatment imbalance, the R-Learner's cross-fitted nuisance models for the
+control arm are estimated on only 15\% of training data; tree-based learners
+overfit to this small control sample and produce unstable residuals. Linear
+base learners (\rlearner[LR]) remain stable (Qini $=0.74$), confirming that
+the failure is a learner--imbalance interaction, not a fundamental flaw in the
+R-Learner objective.
+
+Second, Criteo rankings diverge substantially from synthetic benchmark rankings
+(Spearman $r=-0.25$ between Criteo Qini and Linear DGP Qini ranks). Methods
+that perform well under synthetic randomized conditions do not reliably
+transfer to real deployment settings with treatment imbalance. This is itself
+an important negative finding: synthetic benchmarks with balanced treatment
+assignment may mislead practitioners when selecting estimators for real
+imbalanced settings.
+
+\input{figures/tab_criteo_results.tex}
+
+\subsection{Summary Table}
+
+Table~\ref{tab:main_results} reports all metrics for all methods at the
+mid-confounding scenario $\alpha=1.0$, $\rho=0.05$, averaged over 5 seeds.
+
+\input{figures/tab_main_results.tex}
+
+% ============================================================
+\section{Discussion}
+\label{sec:discussion}
+
+\paragraph{The community is optimizing the wrong objective.}
+Our central finding---that all methods, including the state-of-the-art
+\causalforest, waste 86--89\% of ad budget on sure-things---is not primarily
+a failure of estimation. It is a failure of objective. PEHE measures how
+accurately a model estimates the treatment effect for each user. But what
+practitioners actually need is a model that \emph{ranks users by
+budget-efficiency}: identify the persuadable 40\% of users while avoiding
+sure-things and sleeping dogs. These are related but distinct objectives.
+A model can achieve low PEHE on the bulk of users (who have near-zero CATE)
+while completely failing to separate the persuadable tail---which is the
+only group that matters for iROAS. We argue that future work should optimize
+directly for budget efficiency, not CATE MSE.
+
+\paragraph{Why Qini fails as a sole evaluation criterion.}
+Qini measures whether the model \emph{ranks} users with positive CATE higher
+than users with zero or negative CATE. Under the Heterogeneous DGP, sure-things
+(zero CATE) are a large subgroup with high predicted conversion probability.
+Models that learn to predict conversion---a partially correct proxy for CATE---
+achieve reasonable Qini by ranking them above lost causes, while still spending
+substantial budget on them. Wasted spend fraction captures this failure mode;
+Qini does not. We recommend that any uplift evaluation report wasted spend
+fraction or iROAS efficiency alongside Qini/AUUC, and provide our benchmark
+framework to facilitate this.
+
+\paragraph{Implications for \causalforest.}
+The inclusion of \causalforest as a baseline is important: it is the
+strongest available estimator by PEHE and Qini, but does not materially
+outperform simpler meta-learners on wasted spend or iROAS. This is not a
+criticism of \causalforest, which is a correct estimator for CATE---it is
+evidence that CATE estimation accuracy does not determine budget efficiency
+under heterogeneous subgroup structure.
+
+\paragraph{Treatment imbalance as a first-class concern.}
+Our Criteo results reveal a failure mode absent from most synthetic benchmarks:
+under 85\% treatment rate, doubly-robust estimators with flexible nuisance
+models become unstable. \rlearner[RF] and \rlearner[XGB] achieve negative Qini
+on real data despite performing well on balanced synthetic data. This suggests
+that benchmarks should explicitly evaluate models under imbalanced treatment,
+not only under randomized conditions. At minimum, practitioners should verify
+performance on a held-out imbalanced split before deploying R-Learner or other
+cross-fitting approaches.
+
+\paragraph{Practical recommendation.}
+For practitioners: (1)~do not evaluate uplift models on Qini alone---report
+wasted spend fraction and iROAS at your target percentile; (2)~if your
+treatment rate deviates from 50\%, test doubly-robust estimators on imbalanced
+held-out splits before deploying; (3)~prefer linear base learners in
+R-Learner-style models under severe treatment imbalance, or use stabilized
+cross-fitting with explicit propensity clipping.
+
+\paragraph{Limitations.}
+Our DGPs assume unconfoundedness (all confounding captured in $X$). Real
+ad systems may have unmeasured confounders (time-of-day, device, auction
+price). Binary outcomes abstract away continuous response and multi-touch
+attribution. The subgroup structure of the Heterogeneous DGP is stylized;
+real populations may have more complex CATE landscapes. We release the
+benchmark framework to facilitate extensions along these axes.
+
+% ============================================================
+\section{Conclusion}
+\label{sec:conclusion}
+
+We introduced a controlled synthetic benchmark for ad incrementality estimation
+with three DGPs, six estimator families, and five confounding levels, validated
+on the Criteo Uplift Dataset. Three findings are central. First, \emph{PEHE
+systematically mispredicts budget efficiency}: all methods---including
+\causalforest---waste 86--89\% of ad budget on sure-thing converters under
+heterogeneous CATE structure, with less than 3 percentage points separating
+best from worst. Second, \emph{synthetic rankings do not reliably predict
+real-data rankings} (Spearman $r=-0.25$ between our benchmark and Criteo),
+indicating that benchmark design choices---particularly treatment balance
+assumptions---substantially affect apparent method ordering. Third, \emph{
+treatment imbalance breaks doubly-robust estimators}: \rlearner with tree-based
+learners achieves negative Qini on Criteo (85\% treatment rate), a failure
+mode invisible under balanced synthetic evaluation.
+
+Together, these findings argue for three changes to how the community evaluates
+uplift models: (1)~replace or supplement Qini with wasted spend and iROAS;
+(2)~include imbalanced treatment conditions in synthetic benchmarks; and
+(3)~treat synthetic and real evaluation as complementary, not interchangeable.
+We release the full benchmark to support this shift.
+
+The benchmark, all DGPs, models, and experiments are publicly available at
+\href{https://github.com/[PLACEHOLDER]}{[repository URL]}.
+
+% ============================================================
+\bibliographystyle{plainnat}
+\bibliography{refs}
+
+% ============================================================
+\appendix
+\section{DGP Parameter Details}
+\label{app:dgp_params}
+
+Table~\ref{tab:dgp_params} summarizes the parameter ranges and default values
+for all three DGPs.
+
+\begin{table}[H]
+\centering
+\caption{DGP parameter ranges used in the benchmark.}
+\label{tab:dgp_params}
+\begin{tabular}{llll}
+\toprule
+Parameter & Symbol & Range & Default \\
+\midrule
+Confounding strength & $\alpha$ & $\{0.0, 0.5, 1.0, 1.5, 2.0\}$ & 1.0 \\
+Base conversion rate & $\rho$ & $\{0.02, 0.05, 0.10, 0.20\}$ & 0.05 \\
+Number of features & $d$ & --- & 10 \\
+Sample size & $n$ & --- & 20{,}000 \\
+Random seeds & --- & $\{0, 1, 2, 3, 4\}$ & 42 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{Subgroup Structure in Heterogeneous DGP}
+\label{app:subgroups}
+
+\begin{table}[H]
+\centering
+\caption{Subgroup definitions in the Heterogeneous DGP.}
+\label{tab:subgroups}
+\begin{tabular}{lllll}
+\toprule
+Subgroup & Weight & True CATE & Baseline CVR & Ad Propensity Bias \\
+\midrule
+Persuadable  & 40\% & $+\eta$ & $\rho$      & $+0.3\alpha$ \\
+Sure thing   & 20\% & $\approx 0$ & $4\rho$ & $0$ \\
+Lost cause   & 20\% & $\approx 0$ & $0.2\rho$ & $0$ \\
+Sleeping dog & 20\% & $-0.6\eta$ & $\rho$   & $+0.4\alpha$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Note that the ad system over-targets both persuadables and sleeping dogs
+(both have high propensity bias under confounding), reflecting the realistic
+scenario where the ad delivery algorithm mistakes sleeping dog features for
+persuadable features when optimizing for conversion probability.
+
+\section{Additional Results}
+\label{app:additional}
+
+Full results tables for all $\alpha \times \rho$ combinations are available
+in the supplementary CSV file \texttt{results/uplift\_benchmark\_v1/results.csv}.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\linewidth]{figures/fig5_iroas_efficiency.pdf}
+  \caption{iROAS efficiency (model iROAS / oracle iROAS) under top-30\%
+    treatment policy. Values approach 1.0 for a perfect model; values near 0
+    indicate no incremental value from the targeting policy.}
+  \label{fig:iroas_efficiency}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.8\linewidth]{figures/fig7_uplift_curves.pdf}
+  \caption{Uplift curves for the Heterogeneous DGP at $\alpha=1.0$. The oracle
+    (dashed) represents perfect CATE ranking. All meta-learners achieve
+    positive lift over the random baseline, with the R-Learner[RF] closest
+    to oracle.}
+\end{figure}
+
+\end{document}

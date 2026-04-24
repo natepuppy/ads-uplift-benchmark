@@ -1,0 +1,26 @@
+\begin{table}[t]
+\centering
+\caption{Real-data results on Criteo Uplift Dataset (500k users, mean $\pm$ std over 3 seeds). No ground-truth CATE available; ranking metrics only.}
+\label{tab:criteo_results}
+\small
+\begin{tabular}{llrrr}
+\toprule
+Model & Learner & Qini $\uparrow$ & AUUC $\uparrow$ & Policy Value $\uparrow$ \\
+\midrule
+Causal Forest & RF & 0.8177 $\pm$ 0.6977 & 0.8177 & 0.00225 \\
+R-Learner & LR & 0.7397 $\pm$ 0.0084 & 0.7397 & 0.00257 \\
+S-Learner & LR & 0.6911 $\pm$ 0.0000 & 0.6911 & 0.00257 \\
+T-Learner & XGB & 0.6693 $\pm$ 0.0000 & 0.6693 & 0.00258 \\
+X-Learner & LR & 0.6369 $\pm$ 0.0000 & 0.6369 & 0.00249 \\
+X-Learner & XGB & 0.6289 $\pm$ 0.0000 & 0.6289 & 0.00244 \\
+T-Learner & RF & 0.6089 $\pm$ 0.0381 & 0.6089 & 0.00240 \\
+T-Learner & LR & 0.5877 $\pm$ 0.0000 & 0.5877 & 0.00235 \\
+Uplift RF & RF & 0.5789 $\pm$ 0.1867 & 0.5789 & 0.00199 \\
+X-Learner & RF & 0.5526 $\pm$ 0.0835 & 0.5526 & 0.00233 \\
+S-Learner & RF & 0.3756 $\pm$ 0.0867 & 0.3756 & 0.00167 \\
+S-Learner & XGB & 0.2722 $\pm$ 0.0000 & 0.2722 & 0.00165 \\
+R-Learner & RF & -0.0168 $\pm$ 0.2619 & -0.0168 & 0.00074 \\
+R-Learner & XGB & -0.2250 $\pm$ 0.3600 & -0.2250 & 0.00003 \\
+\bottomrule
+\end{tabular}
+\end{table}

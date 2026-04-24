@@ -1,0 +1,50 @@
+# Benchmark experiment configuration
+# Runs the full grid of DGP x model x learner x hyperparameter combinations.
+
+experiment:
+  name: "uplift_benchmark_v1"
+  results_dir: "results/"
+  n_seeds: 5          # number of random seeds per config (for variance estimates)
+  n_jobs: -1          # parallel jobs (-1 = all cores)
+  test_size: 0.30
+
+# Data generating processes
+dgps:
+  - name: linear
+    n_features: 10
+    n_samples: 20000
+  - name: nonlinear
+    n_features: 10
+    n_samples: 20000
+  - name: heterogeneous
+    n_features: 10
+    n_samples: 20000
+
+# Confounding strength sweep (alpha=0 is randomized; higher = stronger selection bias)
+alpha_grid: [0.0, 0.5, 1.0, 1.5, 2.0]
+
+# Base conversion rate sweep (lower = more class imbalance)
+rho_grid: [0.02, 0.05, 0.10, 0.20]
+
+# Models and base learners to evaluate
+models:
+  - name: slearner
+    learner_types: [lr, rf, xgb]
+  - name: tlearner
+    learner_types: [lr, rf, xgb]
+  - name: xlearner
+    learner_types: [lr, rf, xgb]
+  - name: rlearner
+    learner_types: [lr, rf, xgb]
+  - name: uplift_rf
+    learner_types: [rf]   # UpliftRF is RF-only by design
+  - name: causal_forest
+    learner_types: [rf]   # CausalForestDML with RF nuisance models
+
+# Policy evaluation: fraction of users to target
+top_k: 0.30
+
+# Economic assumptions for iROAS
+economics:
+  revenue_per_conversion: 50.0
+  cost_per_impression: 1.0

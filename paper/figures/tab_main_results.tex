@@ -1,0 +1,60 @@
+\begin{table}[t]
+\centering
+\caption{Benchmark results across DGP types (mean $\pm$ std over 5 seeds, $\alpha=1.0$, $\rho=0.05$)}
+\label{tab:main_results}
+\small
+\begin{tabular}{llllrrr}
+\toprule
+DGP & Model & Learner & PEHE $\downarrow$ & Qini $\uparrow$ & Wasted Spend $\downarrow$ \\
+\midrule
+\multicolumn{6}{l}{\textit{Linear CATE}} \\
+  & Causal Forest & RF & 0.408 $\pm$ 0.054 & 5.335 & 0.871 \\
+  & R-Learner & LR & 0.407 $\pm$ 0.053 & 5.754 & 0.867 \\
+  & R-Learner & RF & 0.411 $\pm$ 0.054 & 7.552 & 0.873 \\
+  & R-Learner & XGB & 0.455 $\pm$ 0.059 & 5.188 & 0.890 \\
+  & S-Learner & LR & 0.409 $\pm$ 0.054 & 7.490 & 0.850 \\
+  & S-Learner & RF & 0.408 $\pm$ 0.054 & 11.655 & 0.875 \\
+  & S-Learner & XGB & 0.408 $\pm$ 0.054 & 9.743 & 0.861 \\
+  & T-Learner & LR & 0.405 $\pm$ 0.053 & 7.703 & 0.849 \\
+  & T-Learner & RF & 0.408 $\pm$ 0.054 & 13.103 & 0.875 \\
+  & T-Learner & XGB & 0.429 $\pm$ 0.060 & 5.370 & 0.873 \\
+  & Uplift RF & RF & 0.415 $\pm$ 0.056 & 7.064 & 0.879 \\
+  & X-Learner & LR & 0.407 $\pm$ 0.053 & 4.972 & 0.865 \\
+  & X-Learner & RF & 0.407 $\pm$ 0.054 & 3.667 & 0.866 \\
+  & X-Learner & XGB & 0.423 $\pm$ 0.056 & 7.758 & 0.882 \\
+\midrule
+\multicolumn{6}{l}{\textit{Nonlinear CATE}} \\
+  & Causal Forest & RF & 0.410 $\pm$ 0.055 & 0.828 & 0.889 \\
+  & R-Learner & LR & 0.410 $\pm$ 0.055 & 0.501 & 0.880 \\
+  & R-Learner & RF & 0.414 $\pm$ 0.055 & 1.026 & 0.888 \\
+  & R-Learner & XGB & 0.458 $\pm$ 0.061 & -0.012 & 0.897 \\
+  & S-Learner & LR & 0.409 $\pm$ 0.055 & 0.103 & 0.834 \\
+  & S-Learner & RF & 0.410 $\pm$ 0.055 & 1.285 & 0.888 \\
+  & S-Learner & XGB & 0.410 $\pm$ 0.055 & 0.198 & 0.879 \\
+  & T-Learner & LR & 0.410 $\pm$ 0.055 & 1.014 & 0.870 \\
+  & T-Learner & RF & 0.411 $\pm$ 0.055 & 2.377 & 0.883 \\
+  & T-Learner & XGB & 0.432 $\pm$ 0.061 & 0.570 & 0.880 \\
+  & Uplift RF & RF & 0.421 $\pm$ 0.060 & 2.267 & 0.882 \\
+  & X-Learner & LR & 0.410 $\pm$ 0.055 & 0.851 & 0.882 \\
+  & X-Learner & RF & 0.411 $\pm$ 0.055 & 1.573 & 0.883 \\
+  & X-Learner & XGB & 0.424 $\pm$ 0.056 & 0.823 & 0.893 \\
+\midrule
+\multicolumn{6}{l}{\textit{Heterogeneous CATE}} \\
+  & Causal Forest & RF & 0.466 $\pm$ 0.099 & 0.131 & 0.875 \\
+  & R-Learner & LR & 0.465 $\pm$ 0.099 & 0.241 & 0.873 \\
+  & R-Learner & RF & 0.470 $\pm$ 0.100 & 0.241 & 0.871 \\
+  & R-Learner & XGB & 0.518 $\pm$ 0.109 & 0.038 & 0.878 \\
+  & S-Learner & LR & 0.465 $\pm$ 0.099 & -0.338 & 0.887 \\
+  & S-Learner & RF & 0.465 $\pm$ 0.099 & -0.025 & 0.874 \\
+  & S-Learner & XGB & 0.466 $\pm$ 0.099 & -0.072 & 0.872 \\
+  & T-Learner & LR & 0.465 $\pm$ 0.099 & 0.085 & 0.872 \\
+  & T-Learner & RF & 0.467 $\pm$ 0.099 & 0.186 & 0.872 \\
+  & T-Learner & XGB & 0.492 $\pm$ 0.110 & -0.109 & 0.870 \\
+  & Uplift RF & RF & 0.472 $\pm$ 0.101 & 0.143 & 0.868 \\
+  & X-Learner & LR & 0.465 $\pm$ 0.099 & 0.146 & 0.881 \\
+  & X-Learner & RF & 0.466 $\pm$ 0.099 & -0.015 & 0.870 \\
+  & X-Learner & XGB & 0.484 $\pm$ 0.104 & -0.011 & 0.881 \\
+\midrule
+\bottomrule
+\end{tabular}
+\end{table}
