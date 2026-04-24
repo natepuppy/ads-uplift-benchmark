@@ -2,8 +2,6 @@
 
 **Paper:** "Benchmarking Uplift Models Under Realistic Confounding: A Controlled Study in Ad Incrementality Estimation"
 
-**Target venue:** NeurIPS 2026 workshop (CausalML / AdKDD track)
-
 ---
 
 ## Overview
